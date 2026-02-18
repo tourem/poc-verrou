@@ -47,7 +47,7 @@ public class ShedLockConfig {
 
     /**
      * LockProvider avec KeepAlive :
-     * 1. JdbcTemplateLockProvider fait les INSERT/UPDATE en base H2 (TCP server)
+     * 1. JdbcTemplateLockProvider fait les INSERT/UPDATE en base PostgreSQL
      * 2. KeepAliveLockProvider le wrappe et renouvelle le verrou periodiquement
      */
     @Bean
@@ -56,16 +56,15 @@ public class ShedLockConfig {
         JdbcTemplateLockProvider jdbcProvider = new JdbcTemplateLockProvider(
             JdbcTemplateLockProvider.Configuration.builder()
                 .withJdbcTemplate(new JdbcTemplate(dataSource))
-                // usingDbTime() est recommande en production (PostgreSQL, MySQL, Oracle)
-                // car il genere INSERT ... ON CONFLICT DO NOTHING.
-                // Sur H2 (POC), on ne l'active pas car H2 ne supporte pas cette syntaxe.
-                // .usingDbTime()
+                // usingDbTime() : utilise l'horloge PostgreSQL (pas celle du serveur app)
+                // et genere INSERT ... ON CONFLICT DO NOTHING (pas de DuplicateKeyException)
+                .usingDbTime()
                 .build()
         );
 
         log.info("+----------------------------------------------------------+");
         log.info("| ShedLock configure avec KeepAliveLockProvider            |");
-        log.info("| Provider : JdbcTemplate (H2 TCP server)                 |");
+        log.info("| Provider : JdbcTemplate (PostgreSQL + usingDbTime)      |");
         log.info("| Le verrou sera renouvele automatiquement                |");
         log.info("| tant que le batch tourne.                               |");
         log.info("+----------------------------------------------------------+");

@@ -47,10 +47,10 @@
             <version>${shedlock.version}</version>
         </dependency>
 
-        <!-- H2 (utilise en mode TCP server pour le POC) -->
+        <!-- PostgreSQL -->
         <dependency>
-            <groupId>com.h2database</groupId>
-            <artifactId>h2</artifactId>
+            <groupId>org.postgresql</groupId>
+            <artifactId>postgresql</artifactId>
             <scope>runtime</scope>
         </dependency>
 

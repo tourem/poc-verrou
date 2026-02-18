@@ -5,19 +5,17 @@ spring:
   application:
     name: shedlock-poc
   datasource:
-    # H2 en mode TCP server (pas en mode fichier)
-    # Le serveur H2 doit etre demarre AVANT les instances (voir README)
-    url: jdbc:h2:tcp://localhost:9092/~/shedlock-poc
-    driver-class-name: org.h2.Driver
-    username: sa
-    password:
+    url: jdbc:postgresql://localhost:5432/shedlock_poc
+    driver-class-name: org.postgresql.Driver
+    username: postgres
+    password: postgres
   sql:
     init:
       mode: always
+      continue-on-error: true
 
 # --- Configuration du POC ---
 batch:
-  # Duree simulee d'execution du batch (en minutes)
   simulated-duration-minutes: ${BATCH_DURATION_MINUTES:20}
 
 # --- Logging ---
