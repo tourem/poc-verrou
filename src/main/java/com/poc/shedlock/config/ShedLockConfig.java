@@ -18,12 +18,13 @@ import java.util.concurrent.ScheduledExecutorService;
 /**
  * Configuration ShedLock avec KeepAliveLockProvider.
  *
- * KeepAliveLockProvider prolonge automatiquement le verrou a mi-parcours
- * de l'intervalle lockAtMostFor. Par exemple, si lockAtMostFor = 5m,
- * le verrou est renouvele toutes les 2m30 tant que la tache tourne.
- *
- * Cela garantit que le verrou est maintenu tant que le process est vivant,
- * sans dependance a un WS externe.
+ * ATTENTION : le ScheduledExecutorService pour le KeepAlive ne doit PAS
+ * etre expose comme bean Spring. Sinon Spring Boot le detecte via
+ * TaskSchedulingAutoConfiguration et l'utilise comme scheduler pour
+ * les methodes @Scheduled. Le batch et le renouvellement du verrou
+ * se retrouvent sur le meme thread unique, le Thread.sleep du batch
+ * bloque le renouvellement, le verrou expire, et une autre instance
+ * l'acquiert -> execution parallele.
  */
 @Configuration
 @EnableScheduling
@@ -32,26 +33,8 @@ public class ShedLockConfig {
 
     private static final Logger log = LoggerFactory.getLogger(ShedLockConfig.class);
 
-    /**
-     * ScheduledExecutorService dedie au renouvellement du verrou.
-     * Un seul thread suffit car il ne fait que des UPDATE SQL legers.
-     */
-    @Bean(destroyMethod = "shutdown")
-    public ScheduledExecutorService keepAliveScheduler() {
-        return Executors.newSingleThreadScheduledExecutor(r -> {
-            Thread t = new Thread(r, "shedlock-keep-alive");
-            t.setDaemon(true);
-            return t;
-        });
-    }
-
-    /**
-     * LockProvider avec KeepAlive :
-     * 1. JdbcTemplateLockProvider fait les INSERT/UPDATE en base PostgreSQL
-     * 2. KeepAliveLockProvider le wrappe et renouvelle le verrou periodiquement
-     */
     @Bean
-    public LockProvider lockProvider(DataSource dataSource, ScheduledExecutorService keepAliveScheduler) {
+    public LockProvider lockProvider(DataSource dataSource) {
 
         JdbcTemplateLockProvider jdbcProvider = new JdbcTemplateLockProvider(
             JdbcTemplateLockProvider.Configuration.builder()
@@ -62,6 +45,14 @@ public class ShedLockConfig {
                 .build()
         );
 
+        // IMPORTANT : cree en local, PAS comme bean Spring
+        // Sinon Spring l'utilise comme TaskScheduler et le batch bloque le renouvellement
+        ScheduledExecutorService keepAliveExecutor = Executors.newSingleThreadScheduledExecutor(r -> {
+            Thread t = new Thread(r, "shedlock-keep-alive");
+            t.setDaemon(true);
+            return t;
+        });
+
         log.info("+----------------------------------------------------------+");
         log.info("| ShedLock configure avec KeepAliveLockProvider            |");
         log.info("| Provider : JdbcTemplate (PostgreSQL + usingDbTime)      |");
@@ -69,6 +60,6 @@ public class ShedLockConfig {
         log.info("| tant que le batch tourne.                               |");
         log.info("+----------------------------------------------------------+");
 
-        return new KeepAliveLockProvider(jdbcProvider, keepAliveScheduler);
+        return new KeepAliveLockProvider(jdbcProvider, keepAliveExecutor);
     }
 }
