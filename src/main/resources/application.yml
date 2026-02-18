@@ -5,23 +5,19 @@ spring:
   application:
     name: shedlock-poc
   datasource:
-    url: jdbc:h2:file:./data/shedlock-poc;AUTO_SERVER=TRUE;DB_CLOSE_DELAY=-1
+    # H2 en mode TCP server (pas en mode fichier)
+    # Le serveur H2 doit etre demarre AVANT les instances (voir README)
+    url: jdbc:h2:tcp://localhost:9092/~/shedlock-poc
     driver-class-name: org.h2.Driver
     username: sa
     password:
   sql:
     init:
       mode: always
-  h2:
-    console:
-      enabled: true
-      path: /h2-console
 
 # --- Configuration du POC ---
 batch:
-  # Durée simulée d'exécution du batch (en minutes)
-  # Passez une valeur > 10 pour tester KeepAliveLockProvider
-  # Exemple : 20 = le batch "tourne" pendant 20 min, le verrou est renouvelé automatiquement
+  # Duree simulee d'execution du batch (en minutes)
   simulated-duration-minutes: ${BATCH_DURATION_MINUTES:20}
 
 # --- Logging ---
@@ -29,4 +25,4 @@ logging:
   level:
     root: INFO
     com.poc.shedlock: DEBUG
-    net.javacrumbs.shedlock: DEBUG
+    net.javacrumbs.shedlock: INFO

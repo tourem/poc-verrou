@@ -17,13 +17,13 @@ Ce POC démontre que **ShedLock avec `KeepAliveLockProvider`** maintient le verr
 │  │                  │     │                               │    │
 │  │  @Scheduled       │────▶│  KeepAliveLockProvider        │    │
 │  │  (cron 10 min)   │     │    └─ JdbcTemplateLockProvider│    │
-│  │                  │     │         └─ usingDbTime()      │    │
+│  │                  │     │                               │    │
 │  │  Durée simulée   │     │                               │    │
 │  │  configurable    │     └──────────────┬────────────────┘    │
 │  └──────────────────┘                    │                      │
 │                                          ▼                      │
 │                              ┌─────────────────────┐           │
-│                              │   H2 (fichier)      │           │
+│                              │   H2 (TCP server)   │           │
 │                              │   table: shedlock    │           │
 │                              │   partagée entre     │           │
 │                              │   les 2 instances    │           │
@@ -36,13 +36,6 @@ Ce POC démontre que **ShedLock avec `KeepAliveLockProvider`** maintient le verr
 - JDK 21
 - Maven 3.9+
 
-## Configuration
-
-| Propriété | Défaut | Description |
-|---|---|---|
-| `batch.simulated-duration-minutes` | 20 | Durée simulée du batch (en minutes) |
-| `server.port` | 8080 | Port HTTP de l'instance |
-
 ## Comment tester
 
 ### Étape 1 — Builder le projet
@@ -51,7 +44,19 @@ Ce POC démontre que **ShedLock avec `KeepAliveLockProvider`** maintient le verr
 mvn clean package -DskipTests
 ```
 
-### Étape 2 — Lancer l'instance A (le batch qui acquiert le verrou)
+### Étape 2 — Lancer le serveur H2 (dans un terminal dédié)
+
+H2 doit tourner en mode **TCP server** (pas en mode fichier) pour garantir
+l'isolation transactionnelle entre les deux instances JVM.
+
+```bash
+java -cp target/shedlock-poc-1.0.0-SNAPSHOT.jar \
+     org.h2.tools.Server -tcp -tcpPort 9092 -tcpAllowOthers -ifNotExists
+```
+
+Vous devriez voir : `TCP server running at tcp://localhost:9092`
+
+### Étape 3 — Lancer l'instance A
 
 ```bash
 java -jar target/shedlock-poc-1.0.0-SNAPSHOT.jar \
@@ -59,7 +64,7 @@ java -jar target/shedlock-poc-1.0.0-SNAPSHOT.jar \
      --batch.simulated-duration-minutes=20
 ```
 
-### Étape 3 — Lancer l'instance B (dans un autre terminal)
+### Étape 4 — Lancer l'instance B (dans un autre terminal)
 
 ```bash
 java -jar target/shedlock-poc-1.0.0-SNAPSHOT.jar \
@@ -67,41 +72,47 @@ java -jar target/shedlock-poc-1.0.0-SNAPSHOT.jar \
      --batch.simulated-duration-minutes=20
 ```
 
-### Étape 4 — Observer les logs
+### Étape 5 — Observer les logs
 
 **Instance A** (celle qui a acquis le verrou en premier) :
 ```
-🟢 BATCH DÉMARRÉ
+[START] BATCH DEMARRE
   Instance       : instance-12345@hostname
-  Durée simulée  : 20 minutes
-  ⏳ En cours... 0m30s écoulées | ~19m restantes | verrou maintenu par KeepAlive
-  ⏳ En cours... 1m0s écoulées  | ~18m restantes | verrou maintenu par KeepAlive
+  Duree simulee  : 20 minutes
+  [RUNNING] [instance-12345@hostname] 0m30s ecoules | ~19m restantes | verrou maintenu par KeepAlive
+  [RUNNING] [instance-12345@hostname] 1m0s ecoules  | ~18m restantes | verrou maintenu par KeepAlive
   ...
-  🔄 >>> 5 min dépassées ! Sans KeepAlive, le verrou aurait expiré. <<<
-  🔄 >>> KeepAliveLockProvider l'a renouvelé automatiquement.       <<<
+  ************************************************************
+  * [KEEPALIVE] 5 min depassees !                            *
+  * Sans KeepAlive, le verrou aurait expire.                 *
+  * KeepAliveLockProvider l'a renouvele automatiquement !     *
+  ************************************************************
   ...
-  ⏳ En cours... 19m30s écoulées | ~0m restantes | verrou maintenu par KeepAlive
-  🏁 BATCH TERMINÉ
+  [DONE] BATCH TERMINE
 ```
 
-**Instance B** (logs ShedLock en DEBUG) :
+**Instance B** (le batch est SKIP car le verrou est tenu par A) :
 ```
-DEBUG n.j.s.core.DefaultLockingTaskExecutor - Not executing 'demo-batch-job'. It's locked.
+INFO n.j.s.core.DefaultLockingTaskExecutor - Not executing 'demo-batch-job'. It's locked.
 ```
-→ Le batch est SKIPPÉ car le verrou est toujours tenu par l'instance A.
 
-### Étape 5 — Vérifier la table shedlock (optionnel)
+### Étape 6 — Verifier la table shedlock (optionnel)
 
-Accédez à la console H2 : `http://localhost:8080/h2-console`
-- JDBC URL : `jdbc:h2:file:./data/shedlock-poc`
-- User : `sa`
-- Password : *(vide)*
+Ouvrir un navigateur sur `http://localhost:8082` (console H2 web).
+Ou bien lancer depuis le jar :
+
+```bash
+java -cp target/shedlock-poc-1.0.0-SNAPSHOT.jar \
+     org.h2.tools.Console -web -webPort 8082
+```
+
+JDBC URL : `jdbc:h2:tcp://localhost:9092/~/shedlock-poc`, user `sa`, pas de mot de passe.
 
 ```sql
 SELECT * FROM shedlock;
 ```
 
-Vous verrez que `lock_until` est régulièrement mis à jour (renouvelé par KeepAlive) tant que le batch tourne.
+Vous verrez que `lock_until` est regulierement mis a jour (renouvele par KeepAlive) tant que le batch tourne.
 
 ## Ce que le POC démontre
 

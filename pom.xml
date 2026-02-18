@@ -47,7 +47,7 @@
             <version>${shedlock.version}</version>
         </dependency>
 
-        <!-- H2 en mémoire -->
+        <!-- H2 (utilise en mode TCP server pour le POC) -->
         <dependency>
             <groupId>com.h2database</groupId>
             <artifactId>h2</artifactId>
