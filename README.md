@@ -177,58 +177,93 @@ shedlock-poc/
 C'est le cas classique des taches planifiees. Le verrou est pose automatiquement
 par l'annotation. Voir `DemoBatchJob.java`.
 
+## A propos de lockAtMostFor avec KeepAliveLockProvider
+
+`lockAtMostFor` peut sembler trompeur : il indique un "temps max" mais avec
+KeepAliveLockProvider, le verrou est renouvele automatiquement tant que le
+batch tourne. En realite, son role change :
+
+| | Sans KeepAlive | Avec KeepAlive |
+|---|---|---|
+| `lockAtMostFor` | Duree max du verrou (risque d'expiration) | Filet de securite en cas de CRASH uniquement |
+| Batch plus long que lockAtMostFor | Verrou expire -> autre instance execute | Verrou renouvele -> pas de probleme |
+| Crash de la JVM | Verrou expire apres lockAtMostFor | Verrou expire apres lockAtMostFor |
+
+**Conseil** : avec KeepAlive, choisir un lockAtMostFor court (5-10 min) pour
+un recovery rapide apres crash. Ce parametre est obligatoire dans ShedLock.
+
 ## Cas 2 : Verrou programmatique SANS annotation
 
 C'est le cas des traitements BFF, listeners JMS, appels REST, ou tout code
-qui n'est pas un cron. Le verrou est pose manuellement via `LockingTaskExecutor`.
+qui n'est pas un cron. Deux patterns sont disponibles.
 
-### Comparaison : lock maison vs ShedLock
+### Pattern 1 : executeWithLock (simple)
 
-**AVANT (lock maison avec try/finally) :**
-```java
-boolean acquired = lockClient.tryAcquire("mon-verrou", Duration.ofMinutes(30));
-if (!acquired) {
-    log.info("Verrou non acquis, skip.");
-    return;
-}
-try {
-    // traitement
-} finally {
-    lockClient.release("mon-verrou");
-}
-```
-
-**APRES (ShedLock programmatique) :**
 ```java
 LockingTaskExecutor executor = new DefaultLockingTaskExecutor(lockProvider);
 
 LockConfiguration config = new LockConfiguration(
     Instant.now(), "mon-verrou",
-    Duration.ofMinutes(30),    // lockAtMostFor
+    Duration.ofMinutes(5),     // lockAtMostFor : recovery apres crash
     Duration.ZERO              // lockAtLeastFor
 );
 
-executor.executeWithLock(() -> {
+TaskResult result = executor.executeWithLock(() -> {
     // traitement -- verrou acquis automatiquement
-    // et libere a la fin, meme en cas d'exception
 }, config);
+
+if (!result.wasExecuted()) {
+    // verrou non acquis (= LockNotAcquiredException)
+}
 ```
 
-Pas de try/finally, pas de release manuelle.
+### Pattern 2 : try/catch (equivalent direct de CustomLock)
 
-### Tester le verrou programmatique
+C'est le mapping 1:1 avec le code existant :
+
+**AVANT :**
+```java
+try (CustomLock lock = lockManager.lock("nomDuVerrou")) {
+    // traitement
+} catch (LockNotAcquiredException e) {
+    // verrou non acquis -> skip
+} catch (Exception e) {
+    // erreur
+}
+```
+
+**APRES :**
+```java
+Optional<SimpleLock> lock = lockProvider.lock(config);
+
+if (lock.isEmpty()) {
+    // equivalent de LockNotAcquiredException
+    log.info("Verrou non acquis -> SKIP");
+    return;
+}
+
+try {
+    // traitement
+} finally {
+    lock.get().unlock();
+}
+```
+
+### Tester les deux patterns
 
 ```bash
-# Terminal 1 : lancer le traitement (verrou 3 min par defaut)
+# Pattern 1 : executeWithLock
 curl http://localhost:8080/api/traitement-programmatique
-
-# Avec une duree specifique (15 min)
-curl "http://localhost:8080/api/traitement-programmatique?durationMinutes=15"
-
-# Terminal 2 : tenter le meme traitement sur l'autre instance -> SKIP
 curl http://localhost:8081/api/traitement-programmatique
+
+# Pattern 2 : try/catch (equivalent CustomLock)
+curl http://localhost:8080/api/traitement-try-catch
+curl http://localhost:8081/api/traitement-try-catch
+
+# Avec une duree specifique
+curl "http://localhost:8080/api/traitement-try-catch?durationMinutes=15"
 ```
 
 Reponses attendues :
 - Instance A : `[instance-12345@host] Traitement execute avec succes (duree: 3 min)`
-- Instance B : `[instance-67890@host] Verrou deja pris par une autre instance -> SKIP`
+- Instance B : `[instance-67890@host] Verrou non acquis -> SKIP`

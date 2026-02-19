@@ -57,14 +57,19 @@ public class DemoBatchJob {
     /**
      * Tache planifiee protegee par ShedLock.
      *
-     * lockAtMostFor = 5m  -> Sans KeepAlive, le verrou expirerait apres 5 min.
-     *                        Avec KeepAlive, il est renouvele automatiquement.
+     * lockAtMostFor = 5m  -> AVEC KeepAliveLockProvider, ce parametre NE LIMITE PAS
+     *                        la duree d'execution du batch. Le verrou est renouvele
+     *                        automatiquement tant que le batch tourne.
+     *                        Son SEUL role : filet de securite en cas de CRASH.
+     *                        Si la JVM meurt, le verrou sera libere apres 5 min max.
+     *                        Choisir une valeur courte (5-10 min) pour un recovery rapide.
+     *
      * lockAtLeastFor = 1m -> Empeche une reexecution dans la minute qui suit.
      */
     @Scheduled(cron = "0 */10 * * * *")  // Toutes les 10 minutes
     @SchedulerLock(
         name = "demo-batch-job",
-        lockAtMostFor = "5m",
+        lockAtMostFor = "5m",       // != duree max du batch, = delai de recovery apres crash
         lockAtLeastFor = "1m"
     )
     public void executerBatch() {

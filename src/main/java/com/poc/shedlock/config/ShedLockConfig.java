@@ -28,6 +28,9 @@ import java.util.concurrent.ScheduledExecutorService;
  */
 @Configuration
 @EnableScheduling
+// defaultLockAtMostFor = filet de securite en cas de crash de la JVM.
+// Avec KeepAliveLockProvider, ce parametre NE LIMITE PAS la duree d'execution.
+// Il definit le delai apres lequel un verrou "orphelin" (crash) sera libere.
 @EnableSchedulerLock(defaultLockAtMostFor = "5m")
 public class ShedLockConfig {
 
