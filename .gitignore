@@ -5,3 +5,4 @@ data/
 .idea/
 *.iml
 .DS_Store
+doc/*.mp4
